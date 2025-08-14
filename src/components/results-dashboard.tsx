@@ -964,7 +964,7 @@ export default function ResultsDashboard({
           <Card className="bg-white/80 backdrop-blur-sm border-cyan-100 mb-6 sm:mb-8">
             <CardHeader>
               <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
-                AI Insights
+                Insights
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
