@@ -1,4 +1,3 @@
-
 import { Loader2, Clock, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
@@ -33,7 +32,6 @@ const RenderProcessingStatus = ({
     <Card className="mt-6 border-cyan-200 bg-white/80 backdrop-blur-sm">
       <CardContent className="p-6">
         <div className="space-y-4">
-          {/* Status Header */}
           <div className="flex items-center gap-3">
             {processingState.status === "uploading" && (
               <Loader2 className="w-5 h-5 text-cyan-600 animate-spin" />
@@ -53,7 +51,7 @@ const RenderProcessingStatus = ({
                 {processingState.status === "uploading" && "Uploading File"}
                 {processingState.status === "processing" &&
                   "Analyzing Statement"}
-                {processingState.status === "completed" && "Analysis Complete"}
+                {processingState.status === "completed"}
                 {processingState.status === "failed" && "Processing Error"}
               </h3>
               <p className="text-sm text-slate-600">
@@ -71,7 +69,6 @@ const RenderProcessingStatus = ({
               )}
           </div>
 
-          {/* Progress Bar */}
           {(processingState.status === "uploading" ||
             processingState.status === "processing") && (
             <div className="space-y-2">
@@ -83,7 +80,6 @@ const RenderProcessingStatus = ({
             </div>
           )}
 
-          {/* Action Buttons */}
           <div className="flex gap-3 pt-2">
             {processingState.status === "completed" && (
               <Button

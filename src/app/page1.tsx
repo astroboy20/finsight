@@ -15,9 +15,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import ResultsDashboard from "@/components/results-dashboard";
-import { useRouter } from "next/navigation";
-import RenderProcessingStatus from "@/components/process-render-status";
 import Status from "@/components/status";
+import RenderProcessingStatus from "@/components/process-render-status";
 
 type ProcessingStatus =
   | "idle"
@@ -36,7 +35,6 @@ interface ProcessingState {
 }
 
 export default function HomePage() {
-  const router = useRouter();
   const [viewState, setViewState] = useState<ViewState>("upload");
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -46,8 +44,7 @@ export default function HomePage() {
     progress: 0,
     message: "",
   });
-  const [id, setID] = useState<string | null>("");
-  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+    const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false)
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -73,8 +70,8 @@ export default function HomePage() {
   const handleFileSelection = (file: File) => {
     setError(null);
     setProcessingState({ status: "idle", progress: 0, message: "" });
-    // setAnalysisData(null);
 
+    // Validate file type
     const allowedTypes = [".pdf", ".csv", ".xlsx", ".xls"];
     const fileExtension = "." + file.name.split(".").pop()?.toLowerCase();
 
@@ -83,6 +80,7 @@ export default function HomePage() {
       return;
     }
 
+    // Validate file size (10MB max)
     if (file.size > 10 * 1024 * 1024) {
       setError("File size must be less than 10MB.");
       return;
@@ -97,10 +95,51 @@ export default function HomePage() {
     }
   };
 
+  const fetchAnalysisData = async (statementId: string) => {
+    const response = await fetch(
+      `https://fin-trackerr-9c402fb58590.herokuapp.com/v1/statements/${statementId}/analysis`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch analysis: ${response.status} - ${response.statusText}`)
+    }
+
+    const data = await response.json()
+
+    return {
+      statementId: data.statementId || statementId,
+      fileName: data.fileName || selectedFile?.name || "bank_statement.pdf",
+      uploadDate: data.uploadDate || new Date().toISOString(),
+      statementPeriod: data.statementPeriod || { start: "2024-01-01", end: "2024-01-31" },
+      processingTime: data.processingTime || 45,
+      summary: data.summary || {
+        totalIncome: 0,
+        totalExpenses: 0,
+        netFlow: 0,
+        transactionCount: 0,
+        averageTransaction: 0,
+      },
+      categoryBreakdown: data.categoryBreakdown || [],
+      monthlyTrends: data.monthlyTrends || [],
+      topMerchants: data.topMerchants || [],
+      insights: data.insights || [],
+      recurringTransactions: data.recurringTransactions || [],
+      unusualTransactions: data.unusualTransactions || [],
+      transactions: data.transactions || [],
+    }
+  }
+
   const handleUpload = async () => {
     if (!selectedFile) return;
 
     try {
+      // Start uploading
       setProcessingState({
         status: "uploading",
         progress: 0,
@@ -108,59 +147,76 @@ export default function HomePage() {
         estimatedTime: 30,
       });
 
+      //formdata
       const formData = new FormData();
+
       formData.append("statement", selectedFile);
 
+      // Simulate upload progress
+      for (let i = 0; i <= 100; i += 10) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        setProcessingState((prev) => ({
+          ...prev,
+          progress: i,
+          message:
+            i === 100
+              ? "Upload complete! Starting analysis..."
+              : "Uploading your bank statement...",
+        }));
+      }
+
+      // Upload to real API endpoint
       const uploadResponse = await fetch(
         "https://fin-trackerr-9c402fb58590.herokuapp.com/v1/statements/upload",
         {
           method: "POST",
           body: formData,
+          headers: {
+            // Don't set Content-Type header - let browser set it with boundary for FormData
+          },
         }
       );
 
       if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
         throw new Error(
-          `Upload failed: ${uploadResponse.status} - ${errorText}`
+          `Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`
         );
       }
 
-      const uploadResult = await uploadResponse.json();
-      console.log("Upload response:", uploadResult);
-
-      const statementId = uploadResult?.data?.statementId;
-      setID(statementId);
-
-      if (!statementId) {
-        throw new Error("No statement ID received from server");
-      }
-
+      const uploadData = await uploadResponse.json();
+      // Start processing
+      const statementId = uploadData?.data?.statementId;
       setProcessingState({
         status: "processing",
-        progress: 10,
-        message: "Upload successful! Starting analysis...",
-        estimatedTime: 120,
+        progress: 0,
+        message:
+          "Your statements are being analyzed. Please hold on for insights.",
+        estimatedTime: 100,
         statementId: statementId,
       });
 
+      // Start polling for status
       pollProcessingStatus(statementId);
     } catch (err) {
-      console.error("Upload error:", err);
       setProcessingState({
         status: "failed",
         progress: 0,
-        message:
-          err instanceof Error
-            ? err.message
-            : "Failed to upload file. Please try again.",
+        message: "Failed to upload file. Please try again.",
       });
     }
   };
 
+  const getProcessingMessage = (progress: number): string => {
+    if (progress < 25) return "Extracting transaction data...";
+    if (progress < 50) return "Categorizing transactions with AI...";
+    if (progress < 75) return "Generating insights and trends...";
+    if (progress < 95) return "Finalizing your analysis...";
+    return "Almost ready...";
+  };
+
   const pollProcessingStatus = async (statementId: string) => {
     const startTime = Date.now();
-    const maxDuration = 200000;
+    const maxDuration = 300000;
     let pollCount = 0;
     const maxPolls = 100;
 
@@ -185,29 +241,41 @@ export default function HomePage() {
           const statusData = await statusResponse.json();
           console.log("Status response:", statusData);
 
-          const apiStatus = statusData?.data?.status;
+          const apiStatus =
+            statusData?.data?.status 
 
-          if (apiStatus === "completed") {
+          if (
+            apiStatus === "completed" ||
+            apiStatus === "success" ||
+            apiStatus === "finished"
+          ) {
             setProcessingState({
               status: "completed",
               progress: 100,
-              message: "Analysis complete! Loading your financial insights...",
+              message: "Analysis complete! Your financial insights are ready.",
               statementId,
             });
             return;
-          } else if (apiStatus === "failed") {
+          } else if (
+            apiStatus === "failed" ||
+            apiStatus === "error" ||
+            apiStatus === "failure"
+          ) {
             throw new Error(
-              statusData?.data?.errorMessage ||
+              statusData.message ||
                 statusData.error ||
                 "Processing failed on server"
             );
-            return;
-          } else if (apiStatus === "processing") {
+          } else if (
+            apiStatus === "processing" ||
+            apiStatus === "pending" ||
+            apiStatus === "in_progress"
+          ) {
             const elapsed = Date.now() - startTime;
             const timeBasedProgress = Math.min(
               (elapsed / maxDuration) * 90,
               90
-            );
+            ); // Cap at 90% for time-based
             const apiProgress = statusData.progress
               ? Math.min(statusData.progress, 95)
               : timeBasedProgress;
@@ -221,7 +289,7 @@ export default function HomePage() {
               ...prev,
               progress,
               estimatedTime: remainingTime,
-              message: statusData.message || getProcessingMessage(progress),
+              message:  getProcessingMessage(progress),
             }));
           } else {
             console.warn("Unknown status:", apiStatus);
@@ -243,6 +311,7 @@ export default function HomePage() {
             throw new Error("Server error. Please try again later.");
           }
 
+          // For other errors, continue with time-based fallback
           const elapsed = Date.now() - startTime;
           const progress = Math.min((elapsed / maxDuration) * 90, 90);
 
@@ -254,8 +323,16 @@ export default function HomePage() {
         }
 
         if (pollCount < maxPolls && Date.now() - startTime < maxDuration) {
-          const delay = Math.min(2000 + pollCount * 500, 5000);
+          const delay = Math.min(2000 + pollCount * 500, 5000); // Start at 2s, increase by 500ms each time, max 5s
           setTimeout(poll, delay);
+        } else if (Date.now() - startTime >= maxDuration) {
+          setProcessingState({
+            status: "completed",
+            progress: 100,
+            message:
+              "Analysis taking longer than expected, but likely complete. View results below.",
+            statementId,
+          });
         }
       } catch (err) {
         console.error("Status polling error:", err);
@@ -273,14 +350,6 @@ export default function HomePage() {
     poll();
   };
 
-  const getProcessingMessage = (progress: number): string => {
-    if (progress < 25) return "Extracting transaction data...";
-    if (progress < 50) return "Categorizing transactions with AI...";
-    if (progress < 75) return "Generating insights and trends...";
-    if (progress < 95) return "Finalizing your analysis...";
-    return "Almost ready...";
-  };
-
   const resetUpload = () => {
     setSelectedFile(null);
     setError(null);
@@ -288,195 +357,194 @@ export default function HomePage() {
     setViewState("upload");
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  };
-
   const handleViewResults = () => {
     setViewState("results");
   };
 
-  
+  const handleDeleteStatement = () => {
+    // TODO: Implement actual delete API call
+    console.log("Deleting statement:", processingState.statementId);
+    resetUpload();
+  };
 
-  // const getMockAnalysis = (): AnalysisData => ({
-  //   statementId: processingState.statementId || "stmt_demo",
-  //   fileName: selectedFile?.name || "bank_statement_march_2024.pdf",
-  //   uploadDate: new Date().toISOString(),
-  //   statementPeriod: { start: "2024-03-01", end: "2024-03-31" },
-  //   processingTime: 45,
-  //   summary: {
-  //     totalIncome: 5420.5,
-  //     totalExpenses: 4180.25,
-  //     netFlow: 1240.25,
-  //     transactionCount: 127,
-  //     averageTransaction: 42.68,
-  //   },
-  //   categoryBreakdown: [
-  //     { category: "Food & Dining", amount: 1250.3, percentage: 29.9 },
-  //     { category: "Transportation", amount: 890.45, percentage: 21.3 },
-  //     { category: "Shopping", amount: 675.2, percentage: 16.1 },
-  //     { category: "Utilities", amount: 420.8, percentage: 10.1 },
-  //     { category: "Entertainment", amount: 315.6, percentage: 7.5 },
-  //     { category: "Healthcare", amount: 280.9, percentage: 6.7 },
-  //     { category: "Other", amount: 347.0, percentage: 8.4 },
-  //   ],
-  //   monthlyTrends: [
-  //     { month: "Jan", income: 5200, expenses: 4100 },
-  //     { month: "Feb", income: 5350, expenses: 3950 },
-  //     { month: "Mar", income: 5420, expenses: 4180 },
-  //   ],
-  //   topMerchants: [
-  //     { merchant: "Whole Foods Market", amount: 485.6, transactions: 12 },
-  //     { merchant: "Shell Gas Station", amount: 320.4, transactions: 8 },
-  //     { merchant: "Amazon", amount: 275.8, transactions: 15 },
-  //     { merchant: "Starbucks", amount: 156.9, transactions: 18 },
-  //     { merchant: "Netflix", amount: 15.99, transactions: 1 },
-  //   ],
-  //   insights: [
-  //     {
-  //       type: "positive" as const,
-  //       title: "Strong Savings Rate",
-  //       description:
-  //         "You saved 22.9% of your income this month, which is above the recommended 20%.",
-  //     },
-  //     {
-  //       type: "negative" as const,
-  //       title: "High Food Spending",
-  //       description:
-  //         "Food & dining represents 29.9% of expenses. Consider meal planning to reduce costs.",
-  //     },
-  //     {
-  //       type: "neutral" as const,
-  //       title: "Consistent Income",
-  //       description:
-  //         "Your income has been stable over the past 3 months with slight growth.",
-  //     },
-  //   ],
-  //   recurringTransactions: [
-  //     {
-  //       merchant: "Netflix",
-  //       amount: 15.99,
-  //       frequency: "Monthly",
-  //       nextExpected: "2024-04-15",
-  //     },
-  //     {
-  //       merchant: "Spotify",
-  //       amount: 9.99,
-  //       frequency: "Monthly",
-  //       nextExpected: "2024-04-10",
-  //     },
-  //     {
-  //       merchant: "City Electric",
-  //       amount: 120.5,
-  //       frequency: "Monthly",
-  //       nextExpected: "2024-04-27",
-  //     },
-  //     {
-  //       merchant: "Rent Payment",
-  //       amount: 1200.0,
-  //       frequency: "Monthly",
-  //       nextExpected: "2024-04-01",
-  //     },
-  //   ],
-  //   unusualTransactions: [
-  //     {
-  //       id: "unusual_1",
-  //       reason: "Amount 3x higher than usual",
-  //       amount: 450.0,
-  //       description: "Large grocery purchase",
-  //     },
-  //     {
-  //       id: "unusual_2",
-  //       reason: "New merchant category",
-  //       amount: 89.99,
-  //       description: "Electronics store purchase",
-  //     },
-  //     {
-  //       id: "unusual_3",
-  //       reason: "Weekend ATM withdrawal",
-  //       amount: 200.0,
-  //       description: "Cash withdrawal at 2 AM",
-  //     },
-  //   ],
-  //   transactions: [
-  //     {
-  //       id: "1",
-  //       date: "2024-03-31",
-  //       description: "Salary Deposit",
-  //       amount: 5420.5,
-  //       category: "Income",
-  //       merchant: "Employer Inc",
-  //       type: "credit" as const,
-  //     },
-  //     {
-  //       id: "2",
-  //       date: "2024-03-30",
-  //       description: "Whole Foods Market",
-  //       amount: -85.4,
-  //       category: "Food & Dining",
-  //       merchant: "Whole Foods Market",
-  //       type: "debit" as const,
-  //     },
-  //     {
-  //       id: "3",
-  //       date: "2024-03-29",
-  //       description: "Shell Gas Station",
-  //       amount: -45.2,
-  //       category: "Transportation",
-  //       merchant: "Shell Gas Station",
-  //       type: "debit" as const,
-  //     },
-  //     {
-  //       id: "4",
-  //       date: "2024-03-28",
-  //       description: "Amazon Purchase",
-  //       amount: -125.99,
-  //       category: "Shopping",
-  //       merchant: "Amazon",
-  //       type: "debit" as const,
-  //     },
-  //     {
-  //       id: "5",
-  //       date: "2024-03-27",
-  //       description: "Electric Bill",
-  //       amount: -120.5,
-  //       category: "Utilities",
-  //       merchant: "City Electric",
-  //       type: "debit" as const,
-  //       isRecurring: true,
-  //     },
-  //     {
-  //       id: "6",
-  //       date: "2024-03-26",
-  //       description: "Large Grocery Purchase",
-  //       amount: -450.0,
-  //       category: "Food & Dining",
-  //       merchant: "Whole Foods Market",
-  //       type: "debit" as const,
-  //       isUnusual: true,
-  //       unusualReason: "Amount 3x higher than usual",
-  //     },
-  //     {
-  //       id: "7",
-  //       date: "2024-03-25",
-  //       description: "Netflix Subscription",
-  //       amount: -15.99,
-  //       category: "Entertainment",
-  //       merchant: "Netflix",
-  //       type: "debit" as const,
-  //       isRecurring: true,
-  //     },
-  //   ],
-  // });
+  const mockAnalysis = {
+    statementId: processingState.statementId || "stmt_demo",
+    fileName: selectedFile?.name || "bank_statement_march_2024.pdf",
+    uploadDate: new Date().toISOString(),
+    statementPeriod: { start: "2024-03-01", end: "2024-03-31" },
+    processingTime: 45,
+    summary: {
+      totalIncome: 5420.5,
+      totalExpenses: 4180.25,
+      netFlow: 1240.25,
+      transactionCount: 127,
+      averageTransaction: 42.68,
+    },
+    categoryBreakdown: [
+      { category: "Food & Dining", amount: 1250.3, percentage: 29.9 },
+      { category: "Transportation", amount: 890.45, percentage: 21.3 },
+      { category: "Shopping", amount: 675.2, percentage: 16.1 },
+      { category: "Utilities", amount: 420.8, percentage: 10.1 },
+      { category: "Entertainment", amount: 315.6, percentage: 7.5 },
+      { category: "Healthcare", amount: 280.9, percentage: 6.7 },
+      { category: "Other", amount: 347.0, percentage: 8.4 },
+    ],
+    monthlyTrends: [
+      { month: "Jan", income: 5200, expenses: 4100 },
+      { month: "Feb", income: 5350, expenses: 3950 },
+      { month: "Mar", income: 5420, expenses: 4180 },
+    ],
+    topMerchants: [
+      { merchant: "Whole Foods Market", amount: 485.6, transactions: 12 },
+      { merchant: "Shell Gas Station", amount: 320.4, transactions: 8 },
+      { merchant: "Amazon", amount: 275.8, transactions: 15 },
+      { merchant: "Starbucks", amount: 156.9, transactions: 18 },
+      { merchant: "Netflix", amount: 15.99, transactions: 1 },
+    ],
+    insights: [
+      {
+        type: "positive" as const,
+        title: "Strong Savings Rate",
+        description:
+          "You saved 22.9% of your income this month, which is above the recommended 20%.",
+      },
+      {
+        type: "negative" as const,
+        title: "High Food Spending",
+        description:
+          "Food & dining represents 29.9% of expenses. Consider meal planning to reduce costs.",
+      },
+      {
+        type: "neutral" as const,
+        title: "Consistent Income",
+        description:
+          "Your income has been stable over the past 3 months with slight growth.",
+      },
+    ],
+    recurringTransactions: [
+      {
+        merchant: "Netflix",
+        amount: 15.99,
+        frequency: "Monthly",
+        nextExpected: "2024-04-15",
+      },
+      {
+        merchant: "Spotify",
+        amount: 9.99,
+        frequency: "Monthly",
+        nextExpected: "2024-04-10",
+      },
+      {
+        merchant: "City Electric",
+        amount: 120.5,
+        frequency: "Monthly",
+        nextExpected: "2024-04-27",
+      },
+      {
+        merchant: "Rent Payment",
+        amount: 1200.0,
+        frequency: "Monthly",
+        nextExpected: "2024-04-01",
+      },
+    ],
+    unusualTransactions: [
+      {
+        id: "unusual_1",
+        reason: "Amount 3x higher than usual",
+        amount: 450.0,
+        description: "Large grocery purchase",
+      },
+      {
+        id: "unusual_2",
+        reason: "New merchant category",
+        amount: 89.99,
+        description: "Electronics store purchase",
+      },
+      {
+        id: "unusual_3",
+        reason: "Weekend ATM withdrawal",
+        amount: 200.0,
+        description: "Cash withdrawal at 2 AM",
+      },
+    ],
+    transactions: [
+      {
+        id: "1",
+        date: "2024-03-31",
+        description: "Salary Deposit",
+        amount: 5420.5,
+        category: "Income",
+        merchant: "Employer Inc",
+        type: "credit" as const,
+      },
+      {
+        id: "2",
+        date: "2024-03-30",
+        description: "Whole Foods Market",
+        amount: -85.4,
+        category: "Food & Dining",
+        merchant: "Whole Foods Market",
+        type: "debit" as const,
+      },
+      {
+        id: "3",
+        date: "2024-03-29",
+        description: "Shell Gas Station",
+        amount: -45.2,
+        category: "Transportation",
+        merchant: "Shell Gas Station",
+        type: "debit" as const,
+      },
+      {
+        id: "4",
+        date: "2024-03-28",
+        description: "Amazon Purchase",
+        amount: -125.99,
+        category: "Shopping",
+        merchant: "Amazon",
+        type: "debit" as const,
+      },
+      {
+        id: "5",
+        date: "2024-03-27",
+        description: "Electric Bill",
+        amount: -120.5,
+        category: "Utilities",
+        merchant: "City Electric",
+        type: "debit" as const,
+        isRecurring: true,
+      },
+      {
+        id: "6",
+        date: "2024-03-26",
+        description: "Large Grocery Purchase",
+        amount: -450.0,
+        category: "Food & Dining",
+        merchant: "Whole Foods Market",
+        type: "debit" as const,
+        isUnusual: true,
+        unusualReason: "Amount 3x higher than usual",
+      },
+      {
+        id: "7",
+        date: "2024-03-25",
+        description: "Netflix Subscription",
+        amount: -15.99,
+        category: "Entertainment",
+        merchant: "Netflix",
+        type: "debit" as const,
+        isRecurring: true,
+      },
+    ],
+  };
 
   if (viewState === "results") {
-    router.push(`/view-analysis/${id}`);
+   ""
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-white">
+      {/* Header */}
       <header className="border-b border-cyan-100 bg-white/80 backdrop-blur-sm">
         <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center gap-3">
@@ -490,8 +558,10 @@ export default function HomePage() {
         </div>
       </header>
 
+      {/* Main Content */}
       <main className="container mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <div className="max-w-4xl mx-auto">
+          {/* Hero Section */}
           <div className="text-center mb-8 sm:mb-12">
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-800 mb-4 font-sans">
               Financial Insights at a Glance
@@ -502,6 +572,7 @@ export default function HomePage() {
             </p>
           </div>
 
+          {/* Upload Card - Hide when processing */}
           {processingState.status === "idle" && (
             <Card className="border-2 border-dashed border-cyan-200 bg-white/60 backdrop-blur-sm mb-6">
               <CardContent className="p-4 sm:p-8">
@@ -577,18 +648,7 @@ export default function HomePage() {
             </Card>
           )}
 
-          {/* Processing Status Display */}
-          <>
-            <RenderProcessingStatus
-              processingState={processingState}
-              selectedFile={selectedFile}
-              handleViewResults={handleViewResults}
-              resetUpload={resetUpload}
-            />
-          </>
-
-          {/* Features Preview - Hide during processing */}
-          {processingState.status === "idle" && <Status />}
+         
         </div>
       </main>
     </div>

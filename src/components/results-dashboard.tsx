@@ -1,29 +1,17 @@
-"use client"
-import { useState } from "react"
+"use client";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
-  ArrowLeft,
-  Calendar,
-  Clock,
-  FileText,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  PieChart,
-  BarChart3,
-  Filter,
-  Search,
-  Trash2,
-  Download,
-  AlertTriangle,
-  Repeat,
-  SlidersHorizontal,
-  X,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -32,143 +20,528 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Label } from "@/components/ui/label"
-import { Slider } from "@/components/ui/slider"
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+} from "@/components/ui/dialog";
 import {
   PieChart as RechartsPieChart,
   Pie,
   Cell,
   ResponsiveContainer,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   BarChart,
   Bar,
   Legend,
-} from "recharts"
+} from "recharts";
+import {
+  ArrowLeft,
+  Trash2,
+  Download,
+  FileText,
+  FileSpreadsheet,
+  ChevronDown,
+  Share,
+} from "lucide-react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import type { AnalysisData } from "@/app/view-analysis/[slug]/page";
+import { toast } from "sonner";
 
 interface ResultsDashboardProps {
-  analysis: any
-  onBack: () => void
-  onDelete: () => void
+  statementId: string;
 }
 
-interface Transaction {
-  id: string
-  date: string
-  description: string
-  category: string
-  merchant: string
-  type: string
-  amount: number
-  isRecurring: boolean
-  isUnusual: boolean
-}
-
-interface CategoryBreakdown {
-  category: string
-  amount: number
-  percentage: number
-}
-
-interface Merchant {
-  merchant: string
-  transactions: number
-  amount: number
-}
-
-interface AdvancedFilters {
-  transactionType: "all" | "debit" | "credit"
-  amountRange: { min: number; max: number }
-  showRecurring: boolean
-  showUnusual: boolean
-}
-
-const formatDate = (date: string) => new Date(date).toLocaleDateString()
-const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`
+const formatDate = (date: string) => new Date(date).toLocaleDateString();
+const formatCurrency = (amount: number) =>
+  `₦${amount.toLocaleString("en-NG", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 const chartConfig = {
   income: { color: "#34D399" },
   expenses: { color: "#EF4444" },
   netFlow: { color: "#60A5FA" },
-}
+};
 
-export default function ResultsDashboard({ analysis, onBack, onDelete }: ResultsDashboardProps) {
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("all")
-  const [categories, setCategories] = useState(["Category1", "Category2", "Category3"])
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
-  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({
-    transactionType: "all",
-    amountRange: { min: 0, max: 1000 },
-    showRecurring: false,
-    showUnusual: false,
-  })
+export default function ResultsDashboard({
+  statementId,
+}: ResultsDashboardProps) {
+  const router = useRouter();
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const lineChartData = [
-    { month: "Jan", income: 2000, expenses: 1500, netFlow: 500 },
-    { month: "Feb", income: 2500, expenses: 2000, netFlow: 500 },
-    { month: "Mar", income: 3000, expenses: 2500, netFlow: 500 },
-  ]
+  const fetchAnalysisData = async (
+    statementId: string
+  ): Promise<AnalysisData> => {
+    const response = await fetch(
+      `https://fin-trackerr-9c402fb58590.herokuapp.com/v1/statements/${statementId}/analysis`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-  const pieChartData = [
-    { name: "Category1", value: 400, fill: "#34D399" },
-    { name: "Category2", value: 300, fill: "#EF4444" },
-    { name: "Category3", value: 300, fill: "#60A5FA" },
-  ]
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch analysis: ${response.status} - ${response.statusText}`
+      );
+    }
 
-  const barChartData = [
-    { merchant: "Merchant1", amount: 1000 },
-    { merchant: "Merchant2", amount: 800 },
-    { merchant: "Merchant3", amount: 600 },
-  ]
+    const apiData = await response.json();
 
-  const hasActiveFilters = () => {
+    return {
+      statementId: apiData.data.statement?.id || statementId,
+      fileName: apiData.data.statement?.fileName || "Unknown File",
+      uploadDate: new Date().toISOString(),
+      statementPeriod: {
+        start:
+          apiData.data.statement?.statementPeriod?.startDate ||
+          apiData.data.analysis?.summary?.statementPeriod?.startDate ||
+          "2024-01-01",
+        end:
+          apiData.data.statement?.statementPeriod?.endDate ||
+          apiData.data.analysis?.summary?.statementPeriod?.endDate ||
+          "2024-01-31",
+      },
+      processingTime: Math.round(
+        (apiData.data.statement?.processingTime || 0) / 1000
+      ),
+      summary: {
+        totalIncome:
+          apiData.data.summary?.totalIncome ||
+          apiData.data.analysis?.summary?.totalIncome ||
+          0,
+        totalExpenses:
+          apiData.data.summary?.totalExpenses ||
+          apiData.data.analysis?.summary?.totalExpenses ||
+          0,
+        netFlow:
+          apiData.data.summary?.netCashFlow ||
+          apiData.data.analysis?.summary?.netCashFlow ||
+          0,
+        transactionCount:
+          apiData.data.summary?.totalTransactions ||
+          apiData.data.analysis?.summary?.totalTransactions ||
+          0,
+        averageTransaction: apiData.data.summary?.averageTransactionAmount || 0,
+      },
+      categoryBreakdown:
+        apiData.data.analysis?.categories?.map((cat: any) => ({
+          category: cat.name,
+          amount: cat.amount,
+          percentage: cat.percentage,
+        })) || [],
+      monthlyTrends:
+        apiData.data.analysis?.monthlyBreakdown?.map((month: any) => ({
+          month: new Date(month.month + "-01").toLocaleDateString("en-US", {
+            month: "short",
+            year: "numeric",
+          }),
+          income: month.income,
+          expenses: month.expenses,
+          netFlow: month.netFlow,
+        })) || [],
+      topMerchants:
+        apiData.data.analysis?.topMerchants?.map((merchant: any) => ({
+          merchant: merchant.name,
+          amount: merchant.amount,
+          transactions: merchant.transactionCount,
+        })) || [],
+      insights:
+        apiData.data.analysis?.insights?.map(
+          (insight: string, index: number) => ({
+            type: "neutral" as const,
+            title: `Financial Insight`,
+            description: insight,
+          })
+        ) || [],
+      recurringTransactions:
+        apiData.data.analysis?.patterns?.recurringPayments?.map(
+          (payment: any) => ({
+            merchant: payment.merchant,
+            amount: payment.amount,
+            frequency: payment.frequency,
+            nextExpected: payment.lastDate,
+          })
+        ) || [],
+      unusualTransactions:
+        apiData.data.analysis?.patterns?.unusualTransactions?.map(
+          (transaction: any) => ({
+            id: `unusual_${Math.random()}`,
+            reason: transaction.reason,
+            amount: transaction.amount,
+            description: transaction.description,
+            date: transaction.date,
+          })
+        ) || [],
+      transactions: [], // Transactions would need separate endpoint
+    };
+  };
+
+  const exportToPDF = async () => {
+    setIsExporting(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const doc = new jsPDF();
+
+      doc.setFontSize(20);
+      doc.setTextColor(8, 145, 178);
+      doc.text("FinSight Analysis Report", 20, 30);
+
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`File: ${analysis?.fileName}`, 20, 50);
+      doc.text(
+        `Period: ${formatDate(
+          analysis?.statementPeriod.start || ""
+        )} to ${formatDate(analysis?.statementPeriod.end || "")}`,
+        20,
+        60
+      );
+      doc.text(`Processing Time: ${analysis?.processingTime}s`, 20, 70);
+
+      doc.setFontSize(16);
+      doc.setTextColor(8, 145, 178);
+      doc.text("Financial Summary", 20, 90);
+
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(
+        `Total Income: ${formatCurrency(analysis?.summary.totalIncome || 0)}`,
+        20,
+        105
+      );
+      doc.text(
+        `Total Expenses: ${formatCurrency(
+          analysis?.summary.totalExpenses || 0
+        )}`,
+        20,
+        115
+      );
+      doc.text(
+        `Net Flow: ${formatCurrency(analysis?.summary.netFlow || 0)}`,
+        20,
+        125
+      );
+      doc.text(
+        `Total Transactions: ${analysis?.summary.transactionCount || 0}`,
+        20,
+        135
+      );
+
+      if (analysis?.insights.length) {
+        doc.setFontSize(16);
+        doc.setTextColor(8, 145, 178);
+        doc.text("AI Insights", 20, 155);
+
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        let yPos = 170;
+        analysis.insights.slice(0, 5).forEach((insight, index) => {
+          const lines = doc.splitTextToSize(`• ${insight.description}`, 170);
+          doc.text(lines, 20, yPos);
+          yPos += lines.length * 5 + 5;
+        });
+      }
+
+      if (analysis?.topMerchants.length) {
+        doc.addPage();
+        doc.setFontSize(16);
+        doc.setTextColor(8, 145, 178);
+        doc.text("Top Merchants", 20, 30);
+
+        doc.setFontSize(11);
+        doc.setTextColor(0, 0, 0);
+        let yPos = 45;
+        analysis.topMerchants.slice(0, 10).forEach((merchant) => {
+          doc.text(
+            `${merchant.merchant}: ${formatCurrency(merchant.amount)} (${
+              merchant.transactions
+            } transactions)`,
+            20,
+            yPos
+          );
+          yPos += 10;
+        });
+      }
+
+      doc.save(`finsight-report-${analysis?.fileName || "analysis"}.pdf`);
+
+      toast("Export Successful", {
+        description: "PDF report has been downloaded successfully.",
+      });
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast("Export Failed", {
+        description: "Failed to generate PDF report. Please try again.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const exportToCSV = async () => {
+    setIsExporting(true);
+    try {
+      const csvRows = [];
+
+      csvRows.push(["FinSight Analysis Report"]);
+      csvRows.push([`File: ${analysis?.fileName}`]);
+      csvRows.push([
+        `Period: ${formatDate(
+          analysis?.statementPeriod.start || ""
+        )} to ${formatDate(analysis?.statementPeriod.end || "")}`,
+      ]);
+      csvRows.push([""]);
+
+      csvRows.push(["FINANCIAL SUMMARY"]);
+      csvRows.push(["Metric", "Amount"]);
+      csvRows.push([
+        "Total Income",
+        formatCurrency(analysis?.summary.totalIncome || 0),
+      ]);
+      csvRows.push([
+        "Total Expenses",
+        formatCurrency(analysis?.summary.totalExpenses || 0),
+      ]);
+      csvRows.push([
+        "Net Flow",
+        formatCurrency(analysis?.summary.netFlow || 0),
+      ]);
+      csvRows.push([
+        "Total Transactions",
+        analysis?.summary.transactionCount?.toString() || "0",
+      ]);
+      csvRows.push([""]);
+
+      csvRows.push(["SPENDING BY CATEGORY"]);
+      csvRows.push(["Category", "Amount", "Percentage"]);
+      analysis?.categoryBreakdown.forEach((cat) => {
+        csvRows.push([
+          cat.category,
+          formatCurrency(cat.amount),
+          `${cat.percentage.toFixed(1)}%`,
+        ]);
+      });
+      csvRows.push([""]);
+
+      csvRows.push(["TOP MERCHANTS"]);
+      csvRows.push(["Merchant", "Amount", "Transactions"]);
+      analysis?.topMerchants.forEach((merchant) => {
+        csvRows.push([
+          merchant.merchant,
+          formatCurrency(merchant.amount),
+          merchant.transactions.toString(),
+        ]);
+      });
+
+      const csvContent = csvRows
+        .map((row) =>
+          row
+            .map((field) => `"${field.toString().replace(/"/g, '""')}"`)
+            .join(",")
+        )
+        .join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute(
+        "download",
+        `finsight-data-${analysis?.fileName || "analysis"}.csv`
+      );
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast("Export Successful", {
+        description: "CSV data has been downloaded successfully.",
+      });
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast("Export Failed", {
+        description: "Failed to generate CSV file. Please try again.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadAnalysis = async () => {
+      try {
+        setIsLoading(true);
+        const analysisData = await fetchAnalysisData(statementId);
+        setAnalysis(analysisData);
+      } catch (err) {
+        console.error("Failed to load analysis:", err);
+        setError(
+          err instanceof Error ? err.message : "Failed to load analysis"
+        );
+        setAnalysis(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadAnalysis();
+  }, [statementId]);
+
+  const handleBack = () => {
+    router.push("/");
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(
+        `https://fin-trackerr-9c402fb58590.herokuapp.com/v1/statements/${statementId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Delete failed: ${response.status}`);
+      }
+
+      toast("Analysis Deleted", {
+        description: "Your financial analysis has been successfully deleted.",
+      });
+
+      setShowDeleteDialog(false);
+      setTimeout(() => {
+        router.push("/");
+      }, 1000);
+    } catch (error) {
+      console.error("Failed to delete statement:", error);
+      toast("Delete Failed", {
+        description: "Failed to delete the analysis. Please try again.",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const lineChartData = analysis?.monthlyTrends || [];
+
+  const pieChartData =
+    analysis?.categoryBreakdown.map((cat, index) => ({
+      name: cat.category,
+      value: cat.amount,
+      percentage: cat.percentage,
+      fill: `hsl(${(index * 45) % 360}, 65%, 55%)`,
+    })) || [];
+
+  const barChartData =
+    analysis?.topMerchants.slice(0, 5).map((merchant) => ({
+      merchant:
+        merchant.merchant.length > 12
+          ? merchant.merchant.substring(0, 12) + "..."
+          : merchant.merchant,
+      fullName: merchant.merchant,
+      amount: merchant.amount,
+      transactions: merchant.transactions,
+    })) || [];
+
+  const renderCustomizedLabel = ({
+    cx,
+    cy,
+    midAngle,
+    innerRadius,
+    outerRadius,
+    percent,
+  }: any) => {
+    if (percent < 0.08) return null;
+
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
     return (
-      advancedFilters.transactionType !== "all" ||
-      advancedFilters.amountRange.min !== 0 ||
-      advancedFilters.amountRange.max !== 1000 ||
-      advancedFilters.showRecurring ||
-      advancedFilters.showUnusual
-    )
+      <text
+        x={x}
+        y={y}
+        fill="white"
+        textAnchor={x > cx ? "start" : "end"}
+        dominantBaseline="central"
+        fontSize={11}
+        fontWeight="500"
+      >
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
+  const CustomBarTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+          <p className="font-medium text-slate-800">{data.fullName}</p>
+          <p className="text-sm text-slate-600">
+            Amount: {formatCurrency(data.amount)}
+          </p>
+          <p className="text-sm text-slate-600">
+            Transactions: {data.transactions}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-800 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading analysis...</p>
+        </div>
+      </div>
+    );
   }
 
-  const clearAdvancedFilters = () => {
-    setAdvancedFilters({
-      transactionType: "all",
-      amountRange: { min: 0, max: 1000 },
-      showRecurring: false,
-      showUnusual: false,
-    })
+  if (error || !analysis) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-white flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-slate-600 mb-4">
+            {error || "Failed to load analysis"}
+          </p>
+          <Button onClick={handleBack} variant="outline">
+            Back to Upload
+          </Button>
+        </div>
+      </div>
+    );
   }
-
-  const filteredTransactions = analysis.transactions.filter((transaction: Transaction) => {
-    const matchesSearch = transaction.description.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesCategory = categoryFilter === "all" || transaction.category === categoryFilter
-    const matchesType =
-      advancedFilters.transactionType === "all" || transaction.type === advancedFilters.transactionType
-    const matchesAmountRange =
-      transaction.amount >= advancedFilters.amountRange.min && transaction.amount <= advancedFilters.amountRange.max
-    const matchesRecurring = !advancedFilters.showRecurring || transaction.isRecurring
-    const matchesUnusual = !advancedFilters.showUnusual || transaction.isUnusual
-
-    return matchesSearch && matchesCategory && matchesType && matchesAmountRange && matchesRecurring && matchesUnusual
-  })
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-white">
-      {/* Header */}
       <header className="border-b border-cyan-100 bg-white/80 backdrop-blur-sm">
         <div className="container mx-auto px-4 sm:px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 sm:gap-4">
-              <Button variant="ghost" size="sm" onClick={onBack} className="text-cyan-800 hover:bg-cyan-50">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleBack}
+                className="text-cyan-800 hover:bg-cyan-50"
+              >
                 <ArrowLeft className="w-4 h-4 mr-1 sm:mr-2" />
                 <span className="hidden sm:inline">Back to Upload</span>
                 <span className="sm:hidden">Back</span>
@@ -177,49 +550,122 @@ export default function ResultsDashboard({ analysis, onBack, onDelete }: Results
                 <div className="w-6 sm:w-8 h-6 sm:h-8 bg-cyan-800 rounded-lg flex items-center justify-center">
                   <FileText className="w-3 sm:w-5 h-3 sm:h-5 text-white" />
                 </div>
-                <h1 className="text-lg sm:text-2xl font-bold text-cyan-800 font-sans">FinSight</h1>
+                <h1 className="text-lg sm:text-2xl font-bold text-cyan-800 font-sans">
+                  FinSight
+                </h1>
               </div>
             </div>
             <div className="flex items-center gap-1 sm:gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-cyan-200 text-cyan-800 hover:bg-cyan-50 bg-transparent hidden sm:flex"
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-cyan-200 text-cyan-800 hover:bg-cyan-50 bg-transparent hidden sm:flex"
+                    disabled={isExporting}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    {isExporting ? "Exporting..." : "Export"}
+                    <ChevronDown className="w-3 h-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onClick={exportToPDF}
+                    disabled={isExporting}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Export as PDF Report
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onClick={exportToCSV}
+                    disabled={isExporting}
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Export Data (CSV)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-cyan-200 text-cyan-800 hover:bg-cyan-50 bg-transparent sm:hidden"
+                    disabled={isExporting}
+                  >
+                    <Share className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onClick={exportToPDF}
+                    disabled={isExporting}
+                  >
+                    <FileText className="h-4 w-4" />
+                    PDF Report
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onClick={exportToCSV}
+                    disabled={isExporting}
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    CSV Data
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Dialog
+                open={showDeleteDialog}
+                onOpenChange={setShowDeleteDialog}
               >
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </Button>
-              <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
                 <DialogTrigger asChild>
                   <Button
                     variant="outline"
                     size="sm"
                     className="border-red-200 text-red-600 hover:bg-red-50 bg-transparent"
+                    disabled={isDeleting}
                   >
                     <Trash2 className="w-4 h-4 sm:mr-2" />
-                    <span className="hidden sm:inline">Delete</span>
+                    <span className="hidden sm:inline">
+                      {isDeleting ? "Deleting..." : "Delete"}
+                    </span>
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="mx-4 sm:mx-0">
+                <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Delete Statement Analysis</DialogTitle>
+                    <DialogTitle>Delete Analysis</DialogTitle>
                     <DialogDescription>
-                      Are you sure you want to delete this analysis? This action cannot be undone.
+                      Are you sure you want to delete this financial analysis?
+                      This action cannot be undone.
                     </DialogDescription>
                   </DialogHeader>
-                  <DialogFooter className="flex-col sm:flex-row gap-2">
-                    <Button variant="outline" onClick={() => setShowDeleteDialog(false)} className="w-full sm:w-auto">
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowDeleteDialog(false)}
+                      disabled={isDeleting}
+                    >
                       Cancel
                     </Button>
                     <Button
                       variant="destructive"
-                      onClick={() => {
-                        onDelete()
-                        setShowDeleteDialog(false)
-                      }}
-                      className="w-full sm:w-auto"
+                      onClick={handleDelete}
+                      disabled={isDeleting}
                     >
-                      Delete
+                      {isDeleting ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Deleting...
+                        </>
+                      ) : (
+                        "Delete"
+                      )}
                     </Button>
                   </DialogFooter>
                 </DialogContent>
@@ -229,256 +675,118 @@ export default function ResultsDashboard({ analysis, onBack, onDelete }: Results
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Statement Info Header */}
         <div className="mb-6 sm:mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
-            <h2 className="text-2xl sm:text-3xl font-bold text-slate-800 font-sans">Financial Analysis</h2>
-            <Badge variant="secondary" className="bg-green-100 text-green-800 w-fit">
-              Analysis Complete
-            </Badge>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 text-sm text-slate-600">
-            <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate">{analysis.fileName}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate">
-                {formatDate(analysis.statementPeriod.start)} - {formatDate(analysis.statementPeriod.end)}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 flex-shrink-0" />
-              <span>Processed in {analysis.processingTime}s</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 flex-shrink-0" />
-              <span>{analysis.summary.transactionCount} transactions</span>
-            </div>
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-800 mb-2 font-sans">
+            {analysis.fileName}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-sm text-slate-600">
+            <span>Uploaded: {formatDate(analysis.uploadDate)}</span>
+            <span className="hidden sm:inline">•</span>
+            <span>
+              Period: {formatDate(analysis.statementPeriod.start)} to{" "}
+              {formatDate(analysis.statementPeriod.end)}
+            </span>
+            <span className="hidden sm:inline">•</span>
+            <span>Processed in {analysis.processingTime}s</span>
           </div>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
           <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader className="pb-2 sm:pb-3">
-              <CardTitle className="text-xs sm:text-sm font-medium text-slate-600 flex items-center gap-2">
-                <TrendingUp className="w-3 sm:w-4 h-3 sm:h-4 text-green-600" />
-                <span className="hidden sm:inline">Total Income</span>
-                <span className="sm:hidden">Income</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-lg sm:text-2xl font-bold text-green-600 font-sans">
-                {formatCurrency(analysis.summary.totalIncome)}
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">
+                    Total Income
+                  </p>
+                  <p className="text-xl sm:text-2xl font-bold text-green-600">
+                    {formatCurrency(analysis.summary.totalIncome)}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader className="pb-2 sm:pb-3">
-              <CardTitle className="text-xs sm:text-sm font-medium text-slate-600 flex items-center gap-2">
-                <TrendingDown className="w-3 sm:w-4 h-3 sm:h-4 text-red-600" />
-                <span className="hidden sm:inline">Total Expenses</span>
-                <span className="sm:hidden">Expenses</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-lg sm:text-2xl font-bold text-red-600 font-sans">
-                {formatCurrency(analysis.summary.totalExpenses)}
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">
+                    Total Expenses
+                  </p>
+                  <p className="text-xl sm:text-2xl font-bold text-red-600">
+                    {formatCurrency(analysis.summary.totalExpenses)}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader className="pb-2 sm:pb-3">
-              <CardTitle className="text-xs sm:text-sm font-medium text-slate-600 flex items-center gap-2">
-                <DollarSign className="w-3 sm:w-4 h-3 sm:h-4 text-cyan-600" />
-                <span className="hidden sm:inline">Net Flow</span>
-                <span className="sm:hidden">Net</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div
-                className={`text-lg sm:text-2xl font-bold font-sans ${analysis.summary.netFlow >= 0 ? "text-green-600" : "text-red-600"}`}
-              >
-                {analysis.summary.netFlow >= 0 ? "+" : ""}
-                {formatCurrency(analysis.summary.netFlow)}
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Net Flow</p>
+                  <p
+                    className={`text-xl sm:text-2xl font-bold ${
+                      analysis.summary.netFlow >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {formatCurrency(analysis.summary.netFlow)}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader className="pb-2 sm:pb-3">
-              <CardTitle className="text-xs sm:text-sm font-medium text-slate-600 flex items-center gap-2">
-                <PieChart className="w-3 sm:w-4 h-3 sm:h-4 text-violet-600" />
-                <span className="hidden sm:inline">Avg Transaction</span>
-                <span className="sm:hidden">Avg</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-lg sm:text-2xl font-bold text-slate-800 font-sans">
-                {formatCurrency(analysis.summary.averageTransaction)}
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">
+                    Transactions
+                  </p>
+                  <p className="text-xl sm:text-2xl font-bold text-slate-800">
+                    {analysis.summary.transactionCount}
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Monthly Trends Chart */}
-        <Card className="mb-6 sm:mb-8 bg-white/80 backdrop-blur-sm border-cyan-100">
-        <CardHeader>
-          <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
-            Monthly Spending Trends
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ChartContainer config={chartConfig} className="h-[200px] sm:h-[250px] lg:h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={lineChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" stroke="#64748b" fontSize={12} />
-                <YAxis stroke="#64748b" fontSize={12} tickFormatter={(value) => `$${(value / 1000).toFixed(1)}k`} />
-                <ChartTooltip
-                  content={<ChartTooltipContent formatter={(value, name) => [formatCurrency(Number(value)), name]} />}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="income"
-                  stroke={chartConfig.income.color}
-                  strokeWidth={3}
-                  dot={{ fill: chartConfig.income.color, strokeWidth: 2, r: 4 }}
-                  name="Income"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="expenses"
-                  stroke={chartConfig.expenses.color}
-                  strokeWidth={3}
-                  dot={{ fill: chartConfig.expenses.color, strokeWidth: 2, r: 4 }}
-                  name="Expenses"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="netFlow"
-                  stroke={chartConfig.netFlow.color}
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={{ fill: chartConfig.netFlow.color, strokeWidth: 2, r: 3 }}
-                  name="Net Flow"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartContainer>
-        </CardContent>
-      </Card>
-
-        {/* Enhanced Insights Panel with Recurring & Unusual Transactions */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader>
-              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">Key Insights</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3 sm:space-y-4">
-                {analysis.insights.map((insight: any, index: number) => (
-                  <div key={index} className="flex items-start gap-3 p-3 sm:p-4 rounded-lg bg-slate-50">
-                    <div
-                      className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
-                        insight.type === "positive"
-                          ? "bg-green-500"
-                          : insight.type === "negative"
-                            ? "bg-red-500"
-                            : "bg-blue-500"
-                      }`}
-                    />
-                    <div>
-                      <h4 className="font-semibold text-slate-800 font-sans text-sm sm:text-base">{insight.title}</h4>
-                      <p className="text-xs sm:text-sm text-slate-600 mt-1">{insight.description}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader>
-              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans flex items-center gap-2">
-                <Repeat className="w-4 sm:w-5 h-4 sm:h-5 text-blue-600" />
-                Recurring Payments
+          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100 flex flex-col min-h-[420px]">
+            <CardHeader className="flex-shrink-0">
+              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
+                Spending by Category
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {analysis.recurringTransactions?.map((recurring: any, index: number) => (
-                  <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-blue-50">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-slate-700 truncate">{recurring.merchant}</div>
-                      <div className="text-xs text-slate-500">{recurring.frequency}</div>
-                    </div>
-                    <div className="text-right ml-2">
-                      <div className="text-sm font-semibold text-slate-800">{formatCurrency(recurring.amount)}</div>
-                      <div className="text-xs text-slate-500">Next: {formatDate(recurring.nextExpected)}</div>
-                    </div>
-                  </div>
-                )) || <div className="text-center py-4 text-slate-500 text-sm">No recurring transactions detected</div>}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-            <CardHeader>
-              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans flex items-center gap-2">
-                <AlertTriangle className="w-4 sm:w-5 h-4 sm:h-5 text-orange-600" />
-                Unusual Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {analysis.unusualTransactions?.map((unusual: any, index: number) => (
-                  <div key={index} className="flex items-start gap-3 p-3 rounded-lg bg-orange-50">
-                    <AlertTriangle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-slate-700 truncate">{unusual.description}</div>
-                      <div className="text-xs text-slate-500 mt-1">{unusual.reason}</div>
-                      <div className="text-sm font-semibold text-orange-700 mt-1">{formatCurrency(unusual.amount)}</div>
-                    </div>
-                  </div>
-                )) || <div className="text-center py-4 text-slate-500 text-sm">No unusual transactions detected</div>}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
-        <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-          <CardHeader>
-            <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
-              Spending by Category
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-              <ChartContainer config={chartConfig} className="h-[180px] sm:h-[200px] lg:h-[220px] w-full">
+            <CardContent className="flex-1 flex items-center">
+              <ChartContainer config={chartConfig} className="h-[320px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <RechartsPieChart>
                     <ChartTooltip
                       content={
-                        <ChartTooltipContent formatter={(value, name) => [formatCurrency(Number(value)), name]} />
+                        <ChartTooltipContent
+                          formatter={(value, name) => [
+                            formatCurrency(Number(value)),
+                            name,
+                          ]}
+                        />
                       }
                     />
                     <Pie
                       data={pieChartData}
                       cx="50%"
                       cy="50%"
-                      innerRadius={25}
-                      outerRadius={60}
+                      labelLine={false}
+                      label={renderCustomizedLabel}
+                      innerRadius={window.innerWidth < 640 ? 30 : 40}
+                      outerRadius={window.innerWidth < 640 ? 70 : 90}
                       paddingAngle={2}
                       dataKey="value"
                     >
@@ -486,296 +794,271 @@ export default function ResultsDashboard({ analysis, onBack, onDelete }: Results
                         <Cell key={`cell-${index}`} fill={entry.fill} />
                       ))}
                     </Pie>
+                    <Legend
+                      verticalAlign="bottom"
+                      height={40}
+                      wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }}
+                      formatter={(value) => (
+                        <span style={{ fontSize: "11px", fontWeight: "400" }}>
+                          {value}
+                        </span>
+                      )}
+                    />
                   </RechartsPieChart>
                 </ResponsiveContainer>
               </ChartContainer>
+            </CardContent>
+          </Card>
 
-              {/* Legend */}
-              <div className="space-y-2 sm:space-y-3">
-                {analysis.categoryBreakdown.map((category: CategoryBreakdown, index: number) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                      <div
-                        className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{
-                          backgroundColor: `hsl(${(index * 45) % 360}, 65%, 55%)`,
-                        }}
+          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100 flex flex-col min-h-[420px]">
+            <CardHeader className="flex-shrink-0">
+              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
+                Top Merchants
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 flex items-center">
+              <ChartContainer config={chartConfig} className="h-[320px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={barChartData}
+                    margin={{
+                      top: 20,
+                      right: window.innerWidth < 640 ? 5 : 15,
+                      left: window.innerWidth < 640 ? 5 : 15,
+                      bottom: window.innerWidth < 640 ? 60 : 80,
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis
+                      dataKey="merchant"
+                      stroke="#64748b"
+                      fontSize={window.innerWidth < 640 ? 9 : 11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={window.innerWidth < 640 ? 60 : 80}
+                      interval={0}
+                      tick={{ fontSize: window.innerWidth < 640 ? 9 : 11 }}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      fontSize={window.innerWidth < 640 ? 9 : 11}
+                      tickFormatter={(value) =>
+                        window.innerWidth < 640
+                          ? `₦${(value / 1000).toFixed(0)}k`
+                          : formatCurrency(value)
+                      }
+                      width={window.innerWidth < 640 ? 50 : 80}
+                    />
+                    <ChartTooltip content={<CustomBarTooltip />} />
+                    <Bar
+                      dataKey="amount"
+                      fill="#0891b2"
+                      radius={[4, 4, 0, 0]}
+                      name="Total Spending"
+                    ></Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+
+          {lineChartData.length > 0 && (
+            <Card className="bg-white/80 backdrop-blur-sm border-cyan-100 flex flex-col min-h-[420px]">
+              <CardHeader className="flex-shrink-0">
+                <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
+                  Monthly Trends
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 flex items-center">
+                <ChartContainer
+                  config={chartConfig}
+                  className="h-[320px] w-full"
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={lineChartData}
+                      margin={{
+                        top: 20,
+                        right: window.innerWidth < 640 ? 5 : 15,
+                        left: window.innerWidth < 640 ? 5 : 15,
+                        bottom: 20,
+                      }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis
+                        dataKey="month"
+                        stroke="#64748b"
+                        fontSize={window.innerWidth < 640 ? 10 : 12}
+                        angle={window.innerWidth < 640 ? -45 : 0}
+                        textAnchor={window.innerWidth < 640 ? "end" : "middle"}
+                        height={window.innerWidth < 640 ? 60 : 30}
                       />
-                      <span className="text-xs sm:text-sm font-medium text-slate-700 truncate">
-                        {category.category}
-                      </span>
-                    </div>
-                    <div className="text-right ml-2">
-                      <div className="text-xs sm:text-sm font-semibold text-slate-800">
-                        {formatCurrency(category.amount)}
-                      </div>
-                      <div className="text-xs text-slate-500">{category.percentage}%</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-          <CardHeader>
-            <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">Top Merchants</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={chartConfig} className="h-[180px] sm:h-[200px] lg:h-[220px] w-full mb-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barChartData} margin={{ top: 10, right: 10, left: 10, bottom: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis
-                    dataKey="merchant"
-                    stroke="#64748b"
-                    fontSize={10}
-                    angle={-45}
-                    textAnchor="end"
-                    height={40}
-                    interval={0}
-                  />
-                  <YAxis stroke="#64748b" fontSize={10} tickFormatter={(value) => `$${value}`} />
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        formatter={(value, name) => [
-                          name === "amount" ? formatCurrency(Number(value)) : value,
-                          name === "amount" ? "Total Spent" : "Transactions",
-                        ]}
+                      <YAxis
+                        stroke="#64748b"
+                        fontSize={window.innerWidth < 640 ? 9 : 11}
+                        tickFormatter={(value) =>
+                          window.innerWidth < 640
+                            ? `₦${(value / 1000).toFixed(0)}k`
+                            : formatCurrency(value)
+                        }
+                        width={window.innerWidth < 640 ? 50 : 80}
                       />
-                    }
-                  />
-                  <Bar dataKey="amount" fill="#8884d8" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartContainer>
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value, name) => [
+                              formatCurrency(Number(value)),
+                              name,
+                            ]}
+                          />
+                        }
+                      />
+                      <Legend
+                        verticalAlign="top"
+                        height={40}
+                        iconType="rect"
+                        wrapperStyle={{ paddingBottom: "15px" }}
+                        formatter={(value) => (
+                          <span
+                            style={{
+                              fontSize:
+                                window.innerWidth < 640 ? "11px" : "12px",
+                              fontWeight: "400",
+                            }}
+                          >
+                            {value === "income"
+                              ? "Income"
+                              : value === "expenses"
+                              ? "Expenses"
+                              : "Net Flow"}
+                          </span>
+                        )}
+                      />
+                      <Bar
+                        dataKey="income"
+                        fill="#34D399"
+                        name="Income"
+                        radius={[2, 2, 0, 0]}
+                      />
+                      <Bar
+                        dataKey="expenses"
+                        fill="#EF4444"
+                        name="Expenses"
+                        radius={[2, 2, 0, 0]}
+                      />
+                      <Bar
+                        dataKey="netFlow"
+                        fill="#60A5FA"
+                        name="Net Flow"
+                        radius={[2, 2, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
-            <div className="space-y-2">
-              {analysis.topMerchants.slice(0, 3).map((merchant: Merchant, index: number) => (
-                <div key={index} className="flex items-center justify-between text-sm">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-slate-700 truncate">{merchant.merchant}</div>
-                    <div className="text-xs text-slate-500">{merchant.transactions} transactions</div>
-                  </div>
-                  <div className="font-semibold text-slate-800 ml-2">{formatCurrency(merchant.amount)}</div>
+        {analysis.insights.length > 0 && (
+          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100 mb-6 sm:mb-8">
+            <CardHeader>
+              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
+                AI Insights
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {analysis.insights.map((insight, index) => (
+                <div
+                  key={index}
+                  className="p-4 rounded-lg bg-slate-50 border-l-4 border-cyan-500"
+                >
+                  <p className="text-sm text-slate-700">
+                    {insight.description}
+                  </p>
                 </div>
               ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Enhanced Transactions Table */}
-        <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {analysis.recurringTransactions.length > 0 && (
+          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100 mb-6 sm:mb-8">
+            <CardHeader>
               <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
-                Transaction History
+                Recurring Payments
               </CardTitle>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-                  <Input
-                    placeholder="Search transactions..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 w-full sm:w-64"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger className="w-full sm:w-40">
-                      <Filter className="w-4 h-4 mr-2" />
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {analysis.recurringTransactions
+                  .slice(0, 5)
+                  .map((transaction, index) => (
+                    <div
+                      key={index}
+                      className="flex justify-between items-center p-3 bg-slate-50 rounded-lg"
+                    >
+                      <div>
+                        <p className="font-medium text-slate-800">
+                          {transaction.merchant}
+                        </p>
+                        <p className="text-sm text-slate-600">
+                          {transaction.frequency}
+                        </p>
+                      </div>
+                      <p className="font-bold text-slate-800">
+                        {formatCurrency(transaction.amount)}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-                  <Popover open={showAdvancedFilters} onOpenChange={setShowAdvancedFilters}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className={`${hasActiveFilters() ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200"}`}
-                      >
-                        <SlidersHorizontal className="w-4 h-4 mr-1 sm:mr-2" />
-                        <span className="hidden sm:inline">Advanced</span>
-                        {hasActiveFilters() && <div className="w-2 h-2 bg-violet-600 rounded-full ml-1 sm:ml-2" />}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80" align="end">
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-slate-800">Advanced Filters</h4>
-                          {hasActiveFilters() && (
-                            <Button variant="ghost" size="sm" onClick={clearAdvancedFilters}>
-                              <X className="w-4 h-4 mr-1" />
-                              Clear
-                            </Button>
-                          )}
-                        </div>
-
-                        <div className="space-y-3">
-                          <div>
-                            <Label className="text-sm font-medium">Transaction Type</Label>
-                            <Select
-                              value={advancedFilters.transactionType}
-                              onValueChange={(value: "all" | "debit" | "credit") =>
-                                setAdvancedFilters((prev) => ({ ...prev, transactionType: value }))
-                              }
-                            >
-                              <SelectTrigger className="w-full mt-1">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">All Types</SelectItem>
-                                <SelectItem value="debit">Expenses Only</SelectItem>
-                                <SelectItem value="credit">Income Only</SelectItem>
-                              </SelectContent>
-                            </Select>
+        {analysis.unusualTransactions.length > 0 && (
+          <Card className="bg-white/80 backdrop-blur-sm border-cyan-100">
+            <CardHeader>
+              <CardTitle className="text-lg sm:text-xl font-bold text-slate-800 font-sans">
+                Unusual Activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {analysis.unusualTransactions
+                  .slice(0, 5)
+                  .map((transaction, index) => (
+                    <div
+                      key={index}
+                      className="p-3 bg-orange-50 border-l-4 border-orange-400 rounded-lg"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex justify-between items-center mb-2">
+                            <p className="font-medium text-slate-800">
+                              {formatCurrency(transaction.amount)}
+                            </p>
+                            {transaction.date && (
+                              <p className="text-sm text-slate-500">
+                                {formatDate(transaction.date)}
+                              </p>
+                            )}
                           </div>
-
-                          <div>
-                            <Label className="text-sm font-medium">Amount Range</Label>
-                            <div className="mt-2 px-2">
-                              <Slider
-                                value={[advancedFilters.amountRange.min, advancedFilters.amountRange.max]}
-                                onValueChange={([min, max]) =>
-                                  setAdvancedFilters((prev) => ({ ...prev, amountRange: { min, max } }))
-                                }
-                                max={1000}
-                                min={0}
-                                step={10}
-                                className="w-full"
-                              />
-                              <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                <span>${advancedFilters.amountRange.min}</span>
-                                <span>${advancedFilters.amountRange.max}+</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={advancedFilters.showRecurring}
-                                onChange={(e) =>
-                                  setAdvancedFilters((prev) => ({ ...prev, showRecurring: e.target.checked }))
-                                }
-                                className="rounded border-slate-300"
-                              />
-                              <span className="text-sm">Recurring only</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={advancedFilters.showUnusual}
-                                onChange={(e) =>
-                                  setAdvancedFilters((prev) => ({ ...prev, showUnusual: e.target.checked }))
-                                }
-                                className="rounded border-slate-300"
-                              />
-                              <span className="text-sm">Unusual only</span>
-                            </label>
-                          </div>
+                          <p className="text-sm text-orange-700 font-medium">
+                            {transaction.reason}
+                          </p>
+                          <p className="text-xs text-slate-600 mt-1">
+                            {transaction.description.substring(0, 100)}...
+                          </p>
                         </div>
                       </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="text-left py-3 px-2 sm:px-4 font-semibold text-slate-700 text-xs sm:text-sm">
-                      Date
-                    </th>
-                    <th className="text-left py-3 px-2 sm:px-4 font-semibold text-slate-700 text-xs sm:text-sm">
-                      Description
-                    </th>
-                    <th className="text-left py-3 px-2 sm:px-4 font-semibold text-slate-700 text-xs sm:text-sm hidden sm:table-cell">
-                      Category
-                    </th>
-                    <th className="text-left py-3 px-2 sm:px-4 font-semibold text-slate-700 text-xs sm:text-sm hidden md:table-cell">
-                      Merchant
-                    </th>
-                    <th className="text-right py-3 px-2 sm:px-4 font-semibold text-slate-700 text-xs sm:text-sm">
-                      Amount
-                    </th>
-                    <th className="text-center py-3 px-2 sm:px-4 font-semibold text-slate-700 text-xs sm:text-sm hidden lg:table-cell">
-                      Flags
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTransactions.map((transaction: Transaction) => (
-                    <tr key={transaction.id} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="py-3 px-2 sm:px-4 text-xs sm:text-sm text-slate-600">
-                        {formatDate(transaction.date)}
-                      </td>
-                      <td className="py-3 px-2 sm:px-4 text-xs sm:text-sm text-slate-800 font-medium">
-                        <div className="truncate max-w-[150px] sm:max-w-none">{transaction.description}</div>
-                        <div className="sm:hidden text-xs text-slate-500 mt-1">
-                          {transaction.category} • {transaction.merchant}
-                        </div>
-                      </td>
-                      <td className="py-3 px-2 sm:px-4 hidden sm:table-cell">
-                        <Badge variant="secondary" className="text-xs">
-                          {transaction.category}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-2 sm:px-4 text-xs sm:text-sm text-slate-600 hidden md:table-cell">
-                        <div className="truncate max-w-[120px]">{transaction.merchant}</div>
-                      </td>
-                      <td
-                        className={`py-3 px-2 sm:px-4 text-xs sm:text-sm font-semibold text-right ${
-                          transaction.type === "credit" ? "text-green-600" : "text-red-600"
-                        }`}
-                      >
-                        {transaction.type === "credit" ? "+" : "-"}
-                        {formatCurrency(Math.abs(transaction.amount))}
-                      </td>
-                      <td className="py-3 px-2 sm:px-4 text-center hidden lg:table-cell">
-                        <div className="flex items-center justify-center gap-1 flex-wrap">
-                          {transaction.isRecurring && (
-                            <Badge variant="outline" className="text-xs border-blue-300 text-blue-700 bg-blue-50">
-                              <Repeat className="w-3 h-3 mr-1" />
-                              Recurring
-                            </Badge>
-                          )}
-                          {transaction.isUnusual && (
-                            <Badge variant="outline" className="text-xs border-orange-300 text-orange-700 bg-orange-50">
-                              <AlertTriangle className="w-3 h-3 mr-1" />
-                              Unusual
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
-            {filteredTransactions.length === 0 && (
-              <div className="text-center py-8 text-slate-500">No transactions found matching your criteria.</div>
-            )}
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
-  )
+  );
 }
